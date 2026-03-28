@@ -9,7 +9,6 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./shared:/app/shared
       - mnist_cache:/tmp/mnist_data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -30,7 +29,6 @@ services:
       - MAX_ROUNDS=10
       - ROUND_POLL_INTERVAL=5
     volumes:
-      - ./shared:/app/shared
       - mnist_cache:/tmp/mnist_data
     depends_on:
       server:
@@ -49,7 +47,6 @@ services:
       - MAX_ROUNDS=10
       - ROUND_POLL_INTERVAL=5
     volumes:
-      - ./shared:/app/shared
       - mnist_cache:/tmp/mnist_data
     depends_on:
       server:
@@ -68,7 +65,6 @@ services:
       - MAX_ROUNDS=10
       - ROUND_POLL_INTERVAL=5
     volumes:
-      - ./shared:/app/shared
       - mnist_cache:/tmp/mnist_data
     depends_on:
       server:
