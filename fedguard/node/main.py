@@ -37,7 +37,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 import requests
 import torch
@@ -98,18 +98,22 @@ def _wait_for_server(timeout: int = 120) -> None:
     raise RuntimeError(f"Server unreachable after {timeout}s")
 
 
-def _download_model(feature_dim: int) -> torch.nn.Module:
+def _download_model(feature_dim: int) -> tuple[torch.nn.Module, int]:
     for attempt in range(1, RETRY_LIMIT + 1):
         try:
             r = requests.get(f"{SERVER_URL}/get_model", timeout=30)
             r.raise_for_status()
+            hdr = r.headers.get("X-FL-Cycle")
+            if hdr is None:
+                raise RuntimeError("Server response missing X-FL-Cycle header")
+            fl_cycle = int(hdr)
             buf = io.BytesIO(r.content)
             state_dict = torch.load(buf, map_location="cpu", weights_only=True)
             model = get_model(DATASET, input_dim=feature_dim) if DATASET == "nslkdd" \
                 else get_model(DATASET)
             model.load_state_dict(state_dict)
-            log.info("Downloaded global model (%d bytes)", len(r.content))
-            return model
+            log.info("Downloaded global model (%d bytes) | FL cycle=%d", len(r.content), fl_cycle)
+            return model, fl_cycle
         except Exception as exc:
             wait = 2 ** attempt
             log.warning("Download attempt %d failed: %s — retry in %ds", attempt, exc, wait)
@@ -130,9 +134,13 @@ def _poison_weights(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tens
 def _upload(
     state_dict: Dict[str, torch.Tensor],
     metadata: dict,
+    fl_cycle: int,
+    sample_count: int,
     is_delta: bool = False,
 ) -> int:
-    """Serialise weights/delta and POST to server. Returns new server round."""
+    """
+    POST weights to server. Returns server round, or -1 if cycle was stale (409).
+    """
     buf = io.BytesIO()
     torch.save(state_dict, buf)
     buf.seek(0)
@@ -145,15 +153,25 @@ def _upload(
                 f"{SERVER_URL}/submit_weights",
                 data={
                     "node_id": str(NODE_ID),
+                    "cycle_id": str(fl_cycle),
+                    "sample_count": str(sample_count),
                     "metadata": json.dumps(payload_meta),
                 },
                 files={"weights": ("weights.pt", buf, "application/octet-stream")},
                 timeout=60,
             )
+            if r.status_code == 409:
+                log.warning("Stale FL cycle — server rejected upload: %s", r.text)
+                buf.seek(0)
+                return -1
             r.raise_for_status()
             resp = r.json()
-            log.info("Uploaded weights → server round %s", resp.get("round", "?"))
-            return resp.get("round", 0)
+            log.info(
+                "Uploaded weights → round %s | next cycle=%s",
+                resp.get("round", "?"),
+                resp.get("accepting_cycle", "?"),
+            )
+            return int(resp.get("round", 0))
         except Exception as exc:
             wait = 2 ** attempt
             log.warning("Upload attempt %d failed: %s — retry in %ds", attempt, exc, wait)
@@ -181,7 +199,13 @@ def main():
         dataset=DATASET,
         alpha=DIRICHLET_ALPHA,
     )
-    log.info("Data shard ready: %d batches  feature_dim=%d", len(dataloader), feature_dim)
+    sample_count = len(dataloader.dataset)
+    log.info(
+        "Data shard ready: %d batches  feature_dim=%d  samples=%d",
+        len(dataloader),
+        feature_dim,
+        sample_count,
+    )
 
     compressor = TopKCompressor(COMPRESSION_TOP_K) if ENABLE_COMPRESSION else None
     participated = 0
@@ -190,7 +214,7 @@ def main():
         log.info("=== Federated Round %d / %d ===", participated + 1, MAX_ROUNDS)
 
         # 1. Download current global model
-        model = _download_model(feature_dim)
+        model, fl_cycle = _download_model(feature_dim)
         global_sd = {k: v.clone() for k, v in model.state_dict().items()}
 
         # 2. Local training
@@ -227,7 +251,18 @@ def main():
 
         # 5. Upload
         metadata = {**train_meta, "compression": compress_meta}
-        server_round = _upload(local_sd, metadata, is_delta=is_delta)
+        server_round = _upload(
+            local_sd,
+            metadata,
+            fl_cycle=fl_cycle,
+            sample_count=sample_count,
+            is_delta=is_delta,
+        )
+        if server_round < 0:
+            log.info("Re-syncing: stale cycle (not counting this local round).")
+            time.sleep(1)
+            continue
+
         participated += 1
 
         log.info(
