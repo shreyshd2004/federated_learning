@@ -1,5 +1,45 @@
 version: "3.8"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# FedGuard — Advanced Federated Learning System
+#
+# Key knobs (edit these to experiment):
+#   DATASET                 mnist | nslkdd
+#   AGGREGATION_STRATEGY    fedavg | median | trimmed_mean | krum
+#   DIRICHLET_ALPHA         non-IID skew (0.1=extreme, 1.0=moderate, 100=IID)
+#   FEDPROX_MU              proximal coefficient (0=FedAvg, 0.01=FedProx)
+#   ENABLE_DP               true to enable DP-SGD (Opacus)
+#   ENABLE_COMPRESSION      true to enable Top-K gradient compression
+#   NODE_POISONED (node3)   true to simulate a Byzantine attacker
+# ─────────────────────────────────────────────────────────────────────────────
+
+x-node-common: &node-common
+  build:
+    context: .
+    dockerfile: Dockerfile.node
+  environment:
+    - SERVER_URL=http://server:8000
+    - TOTAL_NODES=3
+    - DATASET=mnist
+    - DIRICHLET_ALPHA=0.5
+    - LOCAL_EPOCHS=2
+    - MAX_ROUNDS=10
+    - ROUND_POLL_INTERVAL=5
+    - FEDPROX_MU=0.01
+    - ENABLE_DP=false
+    - DP_EPSILON=10.0
+    - DP_DELTA=1e-5
+    - DP_MAX_GRAD_NORM=1.0
+    - ENABLE_COMPRESSION=false
+    - COMPRESSION_TOP_K=0.1
+    - NODE_POISONED=false
+    - RETRY_LIMIT=5
+  volumes:
+    - mnist_cache:/tmp/fedguard_data
+  depends_on:
+    server:
+      condition: service_healthy
+
 services:
   server:
     build:
@@ -8,67 +48,90 @@ services:
     container_name: fedguard-server
     ports:
       - "8000:8000"
+    environment:
+      - DATASET=mnist
+      - AGGREGATION_STRATEGY=fedavg
+      - BYZANTINE_DETECTION=true
+      - BYZANTINE_COS_THRESHOLD=0.0
+      - BYZANTINE_NORM_SIGMA=2.0
+      - MIN_NODES=2
+      - TOTAL_NODES=3
+      - DATA_DIR=/tmp/fedguard_data
     volumes:
-      - mnist_cache:/tmp/mnist_data
+      - mnist_cache:/tmp/fedguard_data
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 15
 
   node1:
-    build:
-      context: .
-      dockerfile: Dockerfile.node
+    <<: *node-common
     container_name: fedguard-node1
     environment:
       - NODE_ID=1
       - SERVER_URL=http://server:8000
       - TOTAL_NODES=3
+      - DATASET=mnist
+      - DIRICHLET_ALPHA=0.5
       - LOCAL_EPOCHS=2
       - MAX_ROUNDS=10
       - ROUND_POLL_INTERVAL=5
-    volumes:
-      - mnist_cache:/tmp/mnist_data
-    depends_on:
-      server:
-        condition: service_healthy
+      - FEDPROX_MU=0.01
+      - ENABLE_DP=false
+      - DP_EPSILON=10.0
+      - DP_DELTA=1e-5
+      - DP_MAX_GRAD_NORM=1.0
+      - ENABLE_COMPRESSION=false
+      - COMPRESSION_TOP_K=0.1
+      - NODE_POISONED=false
+      - RETRY_LIMIT=5
 
   node2:
-    build:
-      context: .
-      dockerfile: Dockerfile.node
+    <<: *node-common
     container_name: fedguard-node2
     environment:
       - NODE_ID=2
       - SERVER_URL=http://server:8000
       - TOTAL_NODES=3
+      - DATASET=mnist
+      - DIRICHLET_ALPHA=0.5
       - LOCAL_EPOCHS=2
       - MAX_ROUNDS=10
       - ROUND_POLL_INTERVAL=5
-    volumes:
-      - mnist_cache:/tmp/mnist_data
-    depends_on:
-      server:
-        condition: service_healthy
+      - FEDPROX_MU=0.01
+      - ENABLE_DP=false
+      - DP_EPSILON=10.0
+      - DP_DELTA=1e-5
+      - DP_MAX_GRAD_NORM=1.0
+      - ENABLE_COMPRESSION=false
+      - COMPRESSION_TOP_K=0.1
+      - NODE_POISONED=false
+      - RETRY_LIMIT=5
 
   node3:
-    build:
-      context: .
-      dockerfile: Dockerfile.node
+    <<: *node-common
     container_name: fedguard-node3
     environment:
       - NODE_ID=3
       - SERVER_URL=http://server:8000
       - TOTAL_NODES=3
+      - DATASET=mnist
+      - DIRICHLET_ALPHA=0.5
       - LOCAL_EPOCHS=2
       - MAX_ROUNDS=10
       - ROUND_POLL_INTERVAL=5
-    volumes:
-      - mnist_cache:/tmp/mnist_data
-    depends_on:
-      server:
-        condition: service_healthy
+      - FEDPROX_MU=0.01
+      - ENABLE_DP=false
+      - DP_EPSILON=10.0
+      - DP_DELTA=1e-5
+      - DP_MAX_GRAD_NORM=1.0
+      - ENABLE_COMPRESSION=false
+      - COMPRESSION_TOP_K=0.1
+      # ── Set to true to simulate a Byzantine attacker ──
+      - NODE_POISONED=false
+      - RETRY_LIMIT=5
 
   dashboard:
     build:

@@ -3,3 +3,5 @@ uvicorn==0.30.1
 torch==2.3.0
 torchvision==0.18.0
 python-multipart==0.0.9
+pandas==2.2.2
+scikit-learn==1.5.0

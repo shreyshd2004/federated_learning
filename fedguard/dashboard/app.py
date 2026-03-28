@@ -1,12 +1,19 @@
 """
-FedGuard Streamlit Dashboard
+FedGuard — Advanced Streamlit Dashboard
 
-Shows:
-- Current training round
-- Per-node participation status
-- Global accuracy over rounds (line chart)
-- Round-by-round metrics table
-- Live auto-refresh every 5 seconds
+Panels
+------
+1. Header metrics   — round, accuracy, nodes, privacy budget
+2. Node status      — per-node participation + Byzantine flags
+3. Accuracy chart   — global accuracy over rounds
+4. Cosine similarity heatmap — Byzantine detection per round
+5. Privacy budget   — cumulative ε per round (DP-SGD)
+6. Local vs global accuracy — per-node training quality
+7. Compression ratio — bandwidth savings per round
+8. Round details table — full round history
+9. Config sidebar   — live system configuration
+
+Auto-refreshes every 5 seconds.
 """
 import os
 import time
@@ -15,24 +22,19 @@ import pandas as pd
 import requests
 import streamlit as st
 
-SERVER_URL = os.environ.get("SERVER_URL", "http://localhost:8000").rstrip("/")
-REFRESH_INTERVAL = 5  # seconds
+SERVER_URL       = os.environ.get("SERVER_URL", "http://localhost:8000").rstrip("/")
+REFRESH_INTERVAL = 5
 
 st.set_page_config(
     page_title="FedGuard Dashboard",
     page_icon="🛡️",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-# ---------------------------------------------------------------------------
-# Header
-# ---------------------------------------------------------------------------
-st.title("🛡️ FedGuard — Federated Learning Dashboard")
-st.caption("Real-time training monitor for distributed anomaly detection")
-
-# ---------------------------------------------------------------------------
-# Fetch status from server
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# Fetch
+# ─────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=REFRESH_INTERVAL)
 def fetch_status():
@@ -46,114 +48,233 @@ def fetch_status():
 
 status, error = fetch_status()
 
-if error:
-    st.error(f"Cannot reach server at `{SERVER_URL}`: {error}")
-    st.info("Make sure the FedGuard server is running (`docker-compose up server`)")
-    st.stop()
+# ─────────────────────────────────────────────────────────────────────────────
+# Sidebar — config
+# ─────────────────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.title("🛡️ FedGuard")
+    st.caption("Federated Learning for Anomaly Detection")
+    st.divider()
 
-# ---------------------------------------------------------------------------
-# Top metrics row
-# ---------------------------------------------------------------------------
-current_round = status.get("round", 0)
-history = status.get("history", [])
-known_nodes = status.get("known_nodes", [])
-pending_nodes = status.get("pending_nodes", [])
-total_expected = status.get("total_expected_nodes", 3)
-min_needed = status.get("min_nodes_for_aggregation", 2)
+    if status:
+        cfg = status.get("config", {})
+        st.subheader("System Config")
+        st.json(cfg)
+        st.divider()
 
-latest_acc = history[-1]["accuracy"] if history else None
-best_acc = max((h["accuracy"] for h in history), default=None)
+    st.subheader("Controls")
+    if st.button("Reset Training", type="primary"):
+        try:
+            requests.post(f"{SERVER_URL}/reset", timeout=5)
+            st.cache_data.clear()
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Reset failed: {exc}")
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Current Round", current_round)
-col2.metric(
-    "Latest Accuracy",
-    f"{latest_acc:.2%}" if latest_acc is not None else "—",
-)
-col3.metric(
-    "Best Accuracy",
-    f"{best_acc:.2%}" if best_acc is not None else "—",
-)
-col4.metric(
-    "Active Nodes",
-    f"{len(known_nodes)} / {total_expected}",
-)
-
-st.divider()
-
-# ---------------------------------------------------------------------------
-# Node participation
-# ---------------------------------------------------------------------------
-st.subheader("Node Participation")
-node_cols = st.columns(total_expected)
-expected_ids = [str(i) for i in range(1, total_expected + 1)]
-
-for i, node_id in enumerate(expected_ids):
-    with node_cols[i]:
-        if node_id in pending_nodes:
-            st.success(f"Node {node_id}\n\n⏳ Weights pending")
-        elif node_id in known_nodes:
-            st.info(f"Node {node_id}\n\n✅ Submitted this round")
-        else:
-            st.warning(f"Node {node_id}\n\n💤 Not yet seen")
-
-if current_round == 0 and not known_nodes:
-    st.info(f"Waiting for nodes to start training... (need {min_needed}/{total_expected})")
-
-st.divider()
-
-# ---------------------------------------------------------------------------
-# Accuracy chart
-# ---------------------------------------------------------------------------
-st.subheader("Global Accuracy Over Rounds")
-
-if history:
-    df = pd.DataFrame(history)
-    df["round"] = df["round"].astype(int)
-    df["accuracy_pct"] = df["accuracy"] * 100
-
-    # Line chart
-    chart_data = df.set_index("round")[["accuracy_pct"]]
-    chart_data.columns = ["Accuracy (%)"]
-    st.line_chart(chart_data, use_container_width=True)
-
-    # Improvement callout
-    if len(history) >= 2:
-        delta = history[-1]["accuracy"] - history[0]["accuracy"]
-        st.caption(
-            f"Accuracy improved by **{delta:+.2%}** from round 1 to round {current_round}"
-        )
-else:
-    st.info("No rounds completed yet — accuracy chart will appear once training begins.")
-
-st.divider()
-
-# ---------------------------------------------------------------------------
-# Round history table
-# ---------------------------------------------------------------------------
-st.subheader("Round History")
-
-if history:
-    table_df = pd.DataFrame(history)
-    table_df["accuracy"] = table_df["accuracy"].apply(lambda x: f"{x:.2%}")
-    table_df["timestamp"] = pd.to_datetime(table_df["timestamp"], unit="s").dt.strftime(
-        "%H:%M:%S"
-    )
-    table_df.columns = ["Round", "Accuracy", "Nodes", "Time"]
-    st.dataframe(table_df[::-1], use_container_width=True, hide_index=True)
-else:
-    st.caption("No rounds completed yet.")
-
-# ---------------------------------------------------------------------------
-# Auto-refresh
-# ---------------------------------------------------------------------------
-st.divider()
-refresh_col, _ = st.columns([1, 3])
-with refresh_col:
     if st.button("Refresh Now"):
         st.cache_data.clear()
         st.rerun()
 
-st.caption(f"Auto-refreshes every {REFRESH_INTERVAL}s · Server: `{SERVER_URL}`")
+    st.caption(f"Server: `{SERVER_URL}`")
+    st.caption(f"Auto-refresh: {REFRESH_INTERVAL}s")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Error state
+# ─────────────────────────────────────────────────────────────────────────────
+if error:
+    st.error(f"Cannot reach server: {error}")
+    st.info("Start the system with `docker-compose up`")
+    st.stop()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Extract state
+# ─────────────────────────────────────────────────────────────────────────────
+current_round  = status.get("round", 0)
+history        = status.get("history", [])
+known_nodes    = status.get("known_nodes", [])
+pending_nodes  = status.get("pending_nodes", [])
+cfg            = status.get("config", {})
+total_nodes    = cfg.get("total_nodes", 3)
+byz_enabled    = cfg.get("byzantine_detection", False)
+
+latest         = history[-1] if history else {}
+latest_acc     = latest.get("accuracy")
+best_acc       = max((h["accuracy"] for h in history), default=None)
+latest_eps     = latest.get("avg_epsilon")
+flagged_ever   = set(nid for h in history for nid in h.get("flagged_nodes", []))
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. Header metrics
+# ─────────────────────────────────────────────────────────────────────────────
+st.title("🛡️ FedGuard — Federated Learning Monitor")
+
+c1, c2, c3, c4, c5 = st.columns(5)
+c1.metric("Round", current_round)
+c2.metric("Latest Accuracy",  f"{latest_acc:.2%}"  if latest_acc  is not None else "—")
+c3.metric("Best Accuracy",    f"{best_acc:.2%}"    if best_acc    is not None else "—")
+c4.metric("Active Nodes",     f"{len(known_nodes)} / {total_nodes}")
+c5.metric("Privacy Budget ε", f"{latest_eps:.3f}"  if latest_eps  is not None else "off")
+
+if flagged_ever:
+    st.warning(f"Byzantine alert: nodes {sorted(flagged_ever)} flagged in at least one round")
+
+st.divider()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. Node status row
+# ─────────────────────────────────────────────────────────────────────────────
+st.subheader("Node Participation")
+node_cols = st.columns(total_nodes)
+expected_ids = [str(i) for i in range(1, total_nodes + 1)]
+
+for i, nid in enumerate(expected_ids):
+    with node_cols[i]:
+        ever_flagged = nid in flagged_ever
+        if nid in pending_nodes:
+            st.warning(f"**Node {nid}**\n\n⏳ Pending")
+        elif nid in known_nodes and not ever_flagged:
+            st.success(f"**Node {nid}**\n\n✅ Active")
+        elif ever_flagged:
+            st.error(f"**Node {nid}**\n\n⚠️ Flagged")
+        else:
+            st.info(f"**Node {nid}**\n\n💤 Waiting")
+
+st.divider()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. Accuracy chart + 5. Privacy budget
+# ─────────────────────────────────────────────────────────────────────────────
+col_acc, col_eps = st.columns(2)
+
+with col_acc:
+    st.subheader("Global Accuracy Over Rounds")
+    if history:
+        df_acc = pd.DataFrame([
+            {"Round": h["round"], "Accuracy (%)": h["accuracy"] * 100}
+            for h in history
+        ]).set_index("Round")
+        st.line_chart(df_acc, use_container_width=True)
+        if len(history) >= 2:
+            delta = history[-1]["accuracy"] - history[0]["accuracy"]
+            st.caption(f"Δ accuracy from round 1→{current_round}: **{delta:+.2%}**")
+    else:
+        st.info("Waiting for first completed round…")
+
+with col_eps:
+    st.subheader("Cumulative Privacy Budget (ε)")
+    eps_rows = [
+        {"Round": h["round"], "ε spent": h["avg_epsilon"]}
+        for h in history if h.get("avg_epsilon") is not None
+    ]
+    if eps_rows:
+        df_eps = pd.DataFrame(eps_rows).set_index("Round")
+        st.line_chart(df_eps, use_container_width=True)
+        st.caption("Lower ε = stronger privacy guarantee (DP-SGD)")
+    else:
+        st.info("Differential privacy is **disabled**.\nSet `ENABLE_DP=true` to enable.")
+
+st.divider()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. Cosine similarity heatmap (Byzantine detection)
+# ─────────────────────────────────────────────────────────────────────────────
+st.subheader("Byzantine Detection — Cosine Similarity per Round")
+
+cos_rows = []
+for h in history:
+    cos_dict = h.get("cosine_similarities", {})
+    if cos_dict:
+        row = {"Round": h["round"]}
+        row.update({f"Node {k}": v for k, v in cos_dict.items()})
+        cos_rows.append(row)
+
+if cos_rows:
+    df_cos = pd.DataFrame(cos_rows).set_index("Round")
+    # Colour: green = high similarity (trustworthy), red = low (suspicious)
+    styled = df_cos.style.background_gradient(
+        cmap="RdYlGn", vmin=-1.0, vmax=1.0, axis=None
+    ).format("{:.3f}")
+    st.dataframe(styled, use_container_width=True)
+    st.caption(
+        "Values near **+1.0** = aligned with global mean (trusted).  "
+        "Values near **−1.0** = inverted update (Byzantine alert)."
+    )
+elif byz_enabled:
+    st.info("No rounds with cosine data yet.")
+else:
+    st.info("Byzantine detection is **disabled**. Set `BYZANTINE_DETECTION=true`.")
+
+st.divider()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Local vs global accuracy
+# ─────────────────────────────────────────────────────────────────────────────
+st.subheader("Local Training Accuracy per Node")
+
+local_rows = []
+for h in history:
+    la = h.get("local_accuracies", {})
+    if la:
+        row = {"Round": h["round"], "Global": h["accuracy"]}
+        row.update({f"Node {k}": v for k, v in la.items() if v is not None})
+        local_rows.append(row)
+
+if local_rows:
+    df_local = pd.DataFrame(local_rows).set_index("Round")
+    st.line_chart(df_local, use_container_width=True)
+    st.caption(
+        "Gap between node local accuracy and global accuracy reveals non-IID drift."
+    )
+else:
+    st.info("Local accuracy data will appear after the first round.")
+
+st.divider()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. Compression ratio
+# ─────────────────────────────────────────────────────────────────────────────
+st.subheader("Gradient Compression (Top-K)")
+
+comp_rows = [
+    {"Round": h["round"], "Compression ratio": h["avg_compression"]}
+    for h in history if h.get("avg_compression") is not None
+]
+if comp_rows:
+    df_comp = pd.DataFrame(comp_rows).set_index("Round")
+    st.bar_chart(df_comp, use_container_width=True)
+    ratio = comp_rows[-1]["Compression ratio"]
+    st.caption(
+        f"Latest ratio: **{ratio:.1%}** of weights transmitted "
+        f"({1 - ratio:.1%} bandwidth saved)."
+    )
+else:
+    st.info("Compression is **disabled**. Set `ENABLE_COMPRESSION=true`.")
+
+st.divider()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. Round history table
+# ─────────────────────────────────────────────────────────────────────────────
+st.subheader("Round History")
+if history:
+    table_rows = []
+    for h in history:
+        table_rows.append({
+            "Round":        h["round"],
+            "Accuracy":     f"{h['accuracy']:.2%}",
+            "Nodes":        h["num_nodes"],
+            "Strategy":     h.get("aggregation", "—"),
+            "Flagged":      ", ".join(h.get("flagged_nodes", [])) or "—",
+            "ε":            f"{h['avg_epsilon']:.3f}" if h.get("avg_epsilon") else "—",
+            "Compression":  f"{h['avg_compression']:.1%}" if h.get("avg_compression") else "—",
+            "Time":         pd.to_datetime(h["timestamp"], unit="s").strftime("%H:%M:%S"),
+        })
+    st.dataframe(pd.DataFrame(table_rows[::-1]), use_container_width=True, hide_index=True)
+else:
+    st.caption("No rounds completed yet.")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auto-refresh
+# ─────────────────────────────────────────────────────────────────────────────
 time.sleep(REFRESH_INTERVAL)
 st.rerun()
