@@ -12,9 +12,11 @@ Panels
 7. Compression ratio — bandwidth savings per round
 8. Round details table — full round history
 9. Config sidebar   — live system configuration
+10. Attack Lab      — DLG gradient leakage attack + DP defence demo
 
 Auto-refreshes every 5 seconds.
 """
+import base64
 import os
 import time
 
@@ -23,6 +25,7 @@ import requests
 import streamlit as st
 
 SERVER_URL       = os.environ.get("SERVER_URL", "http://localhost:8000").rstrip("/")
+ATTACK_URL       = os.environ.get("ATTACK_URL", "http://attack:8888").rstrip("/")
 REFRESH_INTERVAL = 5
 
 st.set_page_config(
@@ -275,6 +278,191 @@ if history:
     st.dataframe(pd.DataFrame(table_rows[::-1]), use_container_width=True, hide_index=True)
 else:
     st.caption("No rounds completed yet.")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 10. Attack Lab — DLG Gradient Leakage
+# ─────────────────────────────────────────────────────────────────────────────
+st.divider()
+st.subheader("Attack Lab — Deep Leakage from Gradients (DLG)")
+
+st.markdown(
+    """
+    **Threat:** An honest-but-curious server can reconstruct a node's *private training images*
+    from the gradient upload alone — without ever seeing the raw data.
+
+    **Defence:** DP-SGD adds calibrated Gaussian noise before upload, degrading reconstruction.
+
+    > *Zhu et al., "Deep Leakage from Gradients" NeurIPS 2019*
+    """
+)
+
+# Check if attack server is reachable
+attack_online = False
+try:
+    resp = requests.get(f"{ATTACK_URL}/health", timeout=3)
+    attack_online = resp.status_code == 200
+except Exception:
+    pass
+
+if not attack_online:
+    st.warning(
+        "Attack server is offline. Add `attack` service to docker-compose and rebuild.\n\n"
+        "Set `ATTACK_URL=http://attack:8888` in the dashboard environment."
+    )
+else:
+    atk_col1, atk_col2 = st.columns([1, 2])
+
+    with atk_col1:
+        st.markdown("**Attack parameters**")
+        img_idx   = st.number_input("MNIST test image index", 0, 9999, 0, 1)
+        iters     = st.slider("L-BFGS iterations", 50, 500, 300, 50)
+        use_idlg  = st.checkbox("Use iDLG (analytical label extraction)", value=True)
+        tv_weight = st.select_slider(
+            "TV regularisation weight",
+            options=[0.0, 1e-5, 1e-4, 1e-3, 1e-2],
+            value=1e-4,
+        )
+
+        st.markdown("---")
+        st.markdown("**Run single noise level**")
+        noise_mult = st.select_slider(
+            "DP noise multiplier (σ)",
+            options=[0.0, 0.1, 0.3, 0.6, 1.1, 2.0],
+            value=0.0,
+            format_func=lambda x: {
+                0.0: "0.0 (No DP, ε=∞)",
+                0.1: "0.1 (ε≈50)",
+                0.3: "0.3 (ε≈10)",
+                0.6: "0.6 (ε≈3)",
+                1.1: "1.1 (ε≈1)",
+                2.0: "2.0 (ε<1)",
+            }.get(x, str(x)),
+        )
+
+        run_single = st.button("Run Attack", type="primary")
+        run_compare = st.button("Run Full Comparison (3 noise levels)")
+
+    with atk_col2:
+        def _show_image(b64: str, caption: str):
+            img_bytes = base64.b64decode(b64)
+            st.image(img_bytes, caption=caption, width=140)
+
+        # ── Single attack ────────────────────────────────────────────────────
+        if run_single:
+            with st.spinner("Running DLG reconstruction…"):
+                try:
+                    r = requests.post(
+                        f"{ATTACK_URL}/run",
+                        json={
+                            "image_index":     img_idx,
+                            "iterations":      iters,
+                            "use_idlg":        use_idlg,
+                            "tv_weight":       tv_weight,
+                            "noise_multiplier": noise_mult,
+                        },
+                        timeout=300,
+                    )
+                    r.raise_for_status()
+                    res = r.json()
+
+                    m = res["metrics"]
+                    p = res["params"]
+
+                    mc1, mc2, mc3 = st.columns(3)
+                    mc1.metric("PSNR", f"{m['psnr_db']} dB",
+                               help="Higher = better reconstruction")
+                    mc2.metric("MSE", f"{m['mse']:.6f}",
+                               help="Lower = better reconstruction")
+                    mc3.metric("Label recovered",
+                               f"{p['predicted_label']} ({'✓' if p['label_correct'] else '✗'})",
+                               help="True label: " + str(p["true_label"]))
+
+                    ic1, ic2, ic3 = st.columns(3)
+                    with ic1:
+                        _show_image(res["images"]["original"], "Original (private)")
+                    with ic2:
+                        _show_image(res["images"]["reconstructed"],
+                                    f"Reconstructed (σ={noise_mult})")
+                    with ic3:
+                        conv_bytes = base64.b64decode(res["images"]["convergence"])
+                        st.image(conv_bytes, caption="Convergence curve", width=280)
+
+                except Exception as exc:
+                    st.error(f"Attack failed: {exc}")
+
+        # ── Comparison (3 noise levels) ──────────────────────────────────────
+        if run_compare:
+            with st.spinner("Running 3-level DP comparison… (~3× longer)"):
+                try:
+                    r = requests.post(
+                        f"{ATTACK_URL}/run_comparison",
+                        params={"image_index": img_idx, "iterations": iters},
+                        timeout=900,
+                    )
+                    r.raise_for_status()
+                    res = r.json()
+
+                    st.markdown("**True label:** `{}`".format(res["true_label"]))
+
+                    # Header row
+                    hcols = st.columns(len(res["comparisons"]) + 1)
+                    with hcols[0]:
+                        _show_image(res["original_b64"], "Original")
+
+                    for col, comp in zip(hcols[1:], res["comparisons"]):
+                        with col:
+                            _show_image(comp["reconstructed_b64"], comp["label"])
+                            st.caption(
+                                f"PSNR: {comp['psnr_db']} dB\n"
+                                f"MSE: {comp['mse']:.5f}\n"
+                                f"Label: {comp['predicted_label']} "
+                                f"({'✓' if comp['label_correct'] else '✗'})"
+                            )
+
+                    # Metrics table
+                    df_comp = pd.DataFrame([
+                        {
+                            "Privacy level": c["label"],
+                            "σ (noise)":     c["noise_multiplier"],
+                            "PSNR (dB)":     c["psnr_db"],
+                            "MSE":           c["mse"],
+                            "Label correct": "Yes" if c["label_correct"] else "No",
+                        }
+                        for c in res["comparisons"]
+                    ])
+                    st.dataframe(df_comp, use_container_width=True, hide_index=True)
+                    st.caption(
+                        "As DP noise increases (σ↑, ε↓), PSNR drops and MSE rises — "
+                        "the server can no longer reconstruct the private training image."
+                    )
+
+                except Exception as exc:
+                    st.error(f"Comparison failed: {exc}")
+
+        # ── Cached results ───────────────────────────────────────────────────
+        if not run_single and not run_compare:
+            try:
+                cached = requests.get(f"{ATTACK_URL}/results", timeout=3).json()
+                if cached.get("status") != "no_results":
+                    st.info("Showing cached results from last attack run.")
+                    if "original_b64" in cached:
+                        # Comparison result
+                        hcols = st.columns(len(cached["comparisons"]) + 1)
+                        with hcols[0]:
+                            _show_image(cached["original_b64"], "Original")
+                        for col, comp in zip(hcols[1:], cached["comparisons"]):
+                            with col:
+                                _show_image(comp["reconstructed_b64"], comp["label"])
+                                st.caption(f"PSNR: {comp['psnr_db']} dB")
+                    elif "images" in cached:
+                        # Single result
+                        ic1, ic2 = st.columns(2)
+                        with ic1:
+                            _show_image(cached["images"]["original"], "Original")
+                        with ic2:
+                            _show_image(cached["images"]["reconstructed"], "Reconstructed")
+            except Exception:
+                st.caption("Click **Run Attack** or **Run Full Comparison** to start.")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Auto-refresh
