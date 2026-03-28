@@ -90,6 +90,7 @@ if error:
 # Extract state
 # ─────────────────────────────────────────────────────────────────────────────
 current_round  = status.get("round", 0)
+accepting_cycle = status.get("accepting_cycle", status.get("config", {}).get("accepting_cycle", 0))
 history        = status.get("history", [])
 known_nodes    = status.get("known_nodes", [])
 pending_nodes  = status.get("pending_nodes", [])
@@ -108,12 +109,13 @@ flagged_ever   = set(nid for h in history for nid in h.get("flagged_nodes", []))
 # ─────────────────────────────────────────────────────────────────────────────
 st.title("🛡️ FedGuard — Federated Learning Monitor")
 
-c1, c2, c3, c4, c5 = st.columns(5)
+c1, c2, c3, c4, c5, c6 = st.columns(6)
 c1.metric("Round", current_round)
-c2.metric("Latest Accuracy",  f"{latest_acc:.2%}"  if latest_acc  is not None else "—")
-c3.metric("Best Accuracy",    f"{best_acc:.2%}"    if best_acc    is not None else "—")
-c4.metric("Active Nodes",     f"{len(known_nodes)} / {total_nodes}")
-c5.metric("Privacy Budget ε", f"{latest_eps:.3f}"  if latest_eps  is not None else "off")
+c2.metric("FL cycle", accepting_cycle)
+c3.metric("Latest Accuracy",  f"{latest_acc:.2%}"  if latest_acc  is not None else "—")
+c4.metric("Best Accuracy",    f"{best_acc:.2%}"    if best_acc    is not None else "—")
+c5.metric("Active Nodes",     f"{len(known_nodes)} / {total_nodes}")
+c6.metric("Privacy Budget ε", f"{latest_eps:.3f}"  if latest_eps  is not None else "off")
 
 if flagged_ever:
     st.warning(f"Byzantine alert: nodes {sorted(flagged_ever)} flagged in at least one round")
@@ -261,6 +263,7 @@ if history:
     for h in history:
         table_rows.append({
             "Round":        h["round"],
+            "FL cycle":     h.get("fl_cycle", "—"),
             "Accuracy":     f"{h['accuracy']:.2%}",
             "Nodes":        h["num_nodes"],
             "Strategy":     h.get("aggregation", "—"),

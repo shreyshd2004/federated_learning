@@ -13,7 +13,7 @@ The caller is responsible for Byzantine screening before passing to these
 functions (or use krum which has built-in robustness).
 """
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import torch
 
@@ -26,16 +26,41 @@ StateDict = Dict[str, torch.Tensor]
 # FedAvg
 # ---------------------------------------------------------------------------
 
-def fed_avg(weight_list: List[StateDict]) -> StateDict:
+def fed_avg(
+    weight_list: List[StateDict],
+    sample_weights: Optional[List[float]] = None,
+    noise_std: float = 0.0,
+) -> StateDict:
     """
-    Standard Federated Averaging: coordinate-wise mean across all nodes.
-    Fast, simple, optimal on IID data.  Diverges on highly skewed non-IID.
+    Federated Averaging: weighted coordinate-wise mean when *sample_weights*
+    is set (shard sizes); uniform mean otherwise.
+
+    *noise_std* > 0 adds Gaussian noise to each parameter after averaging
+    (illustrative only; not formal DP).
     """
     if not weight_list:
         raise ValueError("Cannot aggregate empty list")
+
+    n = len(weight_list)
+    if sample_weights is None:
+        coeffs = [1.0 / n] * n
+    else:
+        if len(sample_weights) != n:
+            raise ValueError("sample_weights length must match weight_list")
+        total = float(sum(sample_weights))
+        if total <= 0:
+            raise ValueError("Sum of sample_weights must be positive")
+        coeffs = [w / total for w in sample_weights]
+
     avg: StateDict = {}
     for key in weight_list[0]:
-        avg[key] = torch.stack([w[key].float() for w in weight_list]).mean(dim=0)
+        acc = None
+        for i, w in enumerate(weight_list):
+            term = w[key].float() * coeffs[i]
+            acc = term if acc is None else acc + term
+        if noise_std > 0:
+            acc = acc + torch.randn_like(acc) * noise_std
+        avg[key] = acc
     return avg
 
 
@@ -123,6 +148,8 @@ _STRATEGIES = {
 def aggregate(
     weight_list: List[StateDict],
     strategy: str = "fedavg",
+    sample_weights: Optional[List[float]] = None,
+    noise_std: float = 0.0,
     **kwargs,
 ) -> StateDict:
     """
@@ -131,7 +158,8 @@ def aggregate(
     Args:
         weight_list: List of state_dicts (already Byzantine-screened if desired).
         strategy:    One of fedavg | median | trimmed_mean | krum.
-        **kwargs:    Forwarded to the strategy function (e.g. trim_ratio, f).
+        sample_weights / noise_std: Only applied for *fedavg* (shard-weighted mean + optional noise).
+        **kwargs:    Forwarded to non-fedavg strategies (e.g. trim_ratio, f).
 
     Returns:
         Aggregated state_dict.
@@ -143,4 +171,6 @@ def aggregate(
         raise ValueError(f"Unknown strategy '{strategy}'. Choose from {list(_STRATEGIES)}")
     fn = _STRATEGIES[strategy]
     log.info("Aggregating %d updates with strategy='%s'", len(weight_list), strategy)
+    if strategy == "fedavg":
+        return fn(weight_list, sample_weights=sample_weights, noise_std=noise_std)
     return fn(weight_list, **kwargs)

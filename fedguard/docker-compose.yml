@@ -11,6 +11,7 @@ version: "3.8"
 #   ENABLE_DP               true to enable DP-SGD (Opacus)
 #   ENABLE_COMPRESSION      true to enable Top-K gradient compression
 #   NODE_POISONED (node3)   true to simulate a Byzantine attacker
+#   AGGREGATION_NOISE_STD   optional Gaussian noise after fedavg (0 = off; demo only)
 # ─────────────────────────────────────────────────────────────────────────────
 
 x-node-common: &node-common
@@ -57,6 +58,7 @@ services:
       - MIN_NODES=2
       - TOTAL_NODES=3
       - DATA_DIR=/tmp/fedguard_data
+      - AGGREGATION_NOISE_STD=0
     volumes:
       - mnist_cache:/tmp/fedguard_data
     healthcheck:

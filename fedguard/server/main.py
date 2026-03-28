@@ -26,6 +26,12 @@ BYZANTINE_COS_THRESHOLD 0.0   (flag nodes with cosine_sim < this)
 BYZANTINE_NORM_SIGMA    2.0   (flag nodes with norm > mean + k*std)
 MIN_NODES               2     (trigger aggregation when this many nodes report)
 TOTAL_NODES             3
+AGGREGATION_NOISE_STD   0     optional Gaussian noise on fedavg output (demo, not formal DP)
+
+FL cycle gating
+---------------
+GET /get_model sends X-FL-Cycle. POST /submit_weights must echo cycle_id; stale
+uploads get HTTP 409 (avoids aggregating weights from an outdated global model).
 """
 import io
 import json
@@ -35,11 +41,11 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import torch
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import Response
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -57,6 +63,7 @@ BYZ_COS_THRESHOLD     = float(os.environ.get("BYZANTINE_COS_THRESHOLD", "0.0"))
 BYZ_NORM_SIGMA        = float(os.environ.get("BYZANTINE_NORM_SIGMA", "2.0"))
 MIN_NODES             = int(os.environ.get("MIN_NODES", "2"))
 TOTAL_NODES           = int(os.environ.get("TOTAL_NODES", "3"))
+AGGREGATION_NOISE_STD = float(os.environ.get("AGGREGATION_NOISE_STD", "0"))
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -75,8 +82,9 @@ lock = threading.Lock()
 
 global_model = GlobalModel(dataset=DATASET)
 current_round: int = 0
+accepting_cycle: int = 0
 
-# node_id → {"weights": bytes, "metadata": dict, "is_delta": bool}
+# node_id → {"weights": bytes, "metadata": dict, "is_delta": bool, "sample_count": int}
 pending: Dict[str, dict] = {}
 
 # Round history entries
@@ -96,28 +104,28 @@ def _deserialise(raw: bytes) -> StateDict:
 
 
 def _try_aggregate() -> None:
-    global current_round
+    global current_round, accepting_cycle
 
     if len(pending) < MIN_NODES:
         log.info("Waiting (%d/%d nodes received)", len(pending), MIN_NODES)
         return
 
-    node_ids   = list(pending.keys())
-    weight_raw = [pending[nid]["weights"]   for nid in node_ids]
-    meta_list  = [pending[nid]["metadata"]  for nid in node_ids]
-    is_delta   = [pending[nid]["is_delta"]  for nid in node_ids]
-
+    submitted_ids = list(pending.keys())
+    weight_raw = [pending[nid]["weights"] for nid in submitted_ids]
     weight_list: List[StateDict] = [_deserialise(raw) for raw in weight_raw]
+    node_ids = submitted_ids.copy()
 
     # --- Byzantine detection -------------------------------------------
     defence_report: dict = {}
     flagged_ids: List[str] = []
     if BYZANTINE_DETECTION and len(weight_list) > 1:
-        weight_list, node_ids, flagged_ids, defence_report = run_defence(
-            weight_list, node_ids,
+        weight_list, clean_ids, flagged_ids, defence_report = run_defence(
+            weight_list,
+            node_ids,
             cosine_threshold=BYZ_COS_THRESHOLD,
             norm_k_sigma=BYZ_NORM_SIGMA,
         )
+        node_ids = clean_ids
         if flagged_ids:
             log.warning("Byzantine nodes flagged: %s", flagged_ids)
 
@@ -126,42 +134,55 @@ def _try_aggregate() -> None:
         return
 
     # --- Aggregation ---------------------------------------------------
-    # If any submission is a delta, reconstruct full weights first
     global_sd = global_model.get_state_dict()
     reconstructed = []
-    for w, delta_flag in zip(weight_list, [pending.get(nid, {}).get("is_delta", False) for nid in node_ids]):
-        if delta_flag:
+    sample_weights = []
+    for w, nid in zip(weight_list, node_ids):
+        if pending[nid]["is_delta"]:
             reconstructed.append(
                 {k: global_sd[k].float() + w[k].float() for k in global_sd}
             )
         else:
             reconstructed.append(w)
+        sample_weights.append(float(pending[nid].get("sample_count", 1)))
 
-    avg_weights = aggregate(reconstructed, strategy=AGGREGATION_STRATEGY)
+    avg_weights = aggregate(
+        reconstructed,
+        strategy=AGGREGATION_STRATEGY,
+        sample_weights=sample_weights,
+        noise_std=AGGREGATION_NOISE_STD,
+    )
     global_model.set_state_dict(avg_weights)
 
     # --- Evaluate ------------------------------------------------------
     accuracy = global_model.evaluate()
     current_round += 1
 
-    # Collect per-node metadata for history
+    # Metadata aligned to *all* submitters; ε / compression from clean nodes only
+    meta_clean = [pending[nid]["metadata"] for nid in node_ids]
     avg_epsilon = None
-    epsilon_vals = [m.get("epsilon_spent") for m in meta_list if m.get("epsilon_spent")]
+    epsilon_vals = [m.get("epsilon_spent") for m in meta_clean if m.get("epsilon_spent")]
     if epsilon_vals:
         avg_epsilon = round(sum(epsilon_vals) / len(epsilon_vals), 4)
 
     avg_compression = None
-    comp_vals = [m.get("compression", {}).get("compression_ratio") for m in meta_list
-                 if m.get("compression", {}).get("compression_ratio") is not None]
+    comp_vals = [
+        m.get("compression", {}).get("compression_ratio")
+        for m in meta_clean
+        if m.get("compression", {}).get("compression_ratio") is not None
+    ]
     if comp_vals:
         avg_compression = round(sum(comp_vals) / len(comp_vals), 4)
 
-    local_accs = {nid: m.get("local_accuracy") for nid, m in zip(list(pending.keys()), meta_list)}
+    local_accs = {
+        nid: pending[nid]["metadata"].get("local_accuracy") for nid in submitted_ids
+    }
 
     round_history.append({
         "round":               current_round,
         "accuracy":            round(accuracy, 4),
-        "num_nodes":           len(pending),
+        "num_nodes":           len(submitted_ids),
+        "fl_cycle":            accepting_cycle,
         "clean_nodes":         node_ids,
         "flagged_nodes":       flagged_ids,
         "aggregation":         AGGREGATION_STRATEGY,
@@ -174,10 +195,17 @@ def _try_aggregate() -> None:
     })
 
     log.info(
-        "Round %d complete | nodes=%d (flagged=%d) | accuracy=%.4f | strategy=%s",
-        current_round, len(pending), len(flagged_ids), accuracy, AGGREGATION_STRATEGY,
+        "Round %d complete | fl_cycle=%d | submitters=%d clean=%d (flagged=%d) | acc=%.4f | strat=%s",
+        current_round,
+        accepting_cycle,
+        len(submitted_ids),
+        len(node_ids),
+        len(flagged_ids),
+        accuracy,
+        AGGREGATION_STRATEGY,
     )
     pending.clear()
+    accepting_cycle += 1
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +225,7 @@ def status():
             "pending_nodes":   list(pending.keys()),
             "known_nodes":     list(known_nodes),
             "history":         round_history,
+            "accepting_cycle": accepting_cycle,
             "config": {
                 "dataset":               DATASET,
                 "aggregation_strategy":  AGGREGATION_STRATEGY,
@@ -204,6 +233,8 @@ def status():
                 "byzantine_cos_threshold": BYZ_COS_THRESHOLD,
                 "min_nodes":             MIN_NODES,
                 "total_nodes":           TOTAL_NODES,
+                "accepting_cycle":       accepting_cycle,
+                "aggregation_noise_std": AGGREGATION_NOISE_STD,
             },
         }
 
@@ -212,18 +243,28 @@ def status():
 def get_model_weights():
     with lock:
         data = global_model.get_weights_bytes()
-    return Response(content=data, media_type="application/octet-stream")
+        cycle = accepting_cycle
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={"X-FL-Cycle": str(cycle)},
+    )
 
 
 @app.post("/submit_weights")
 async def submit_weights(
-    node_id:  str        = Form(...),
-    metadata: str        = Form("{}"),
-    weights:  UploadFile = File(...),
+    node_id: str = Form(...),
+    cycle_id: int = Form(...),
+    sample_count: int = Form(1),
+    metadata: str = Form("{}"),
+    weights: UploadFile = File(...),
 ):
     raw = await weights.read()
     if not raw:
         raise HTTPException(status_code=400, detail="Empty weights payload")
+
+    if sample_count < 1:
+        raise HTTPException(status_code=400, detail="sample_count must be >= 1")
 
     try:
         meta = json.loads(metadata)
@@ -233,22 +274,48 @@ async def submit_weights(
     is_delta = bool(meta.pop("is_delta", False))
 
     with lock:
+        if cycle_id != accepting_cycle:
+            log.warning(
+                "Stale upload from node %s: cycle_id=%s open=%s",
+                node_id,
+                cycle_id,
+                accepting_cycle,
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "stale_or_mismatched_cycle",
+                    "submitted_cycle": cycle_id,
+                    "accepting_cycle": accepting_cycle,
+                },
+            )
+
         known_nodes.add(node_id)
-        pending[node_id] = {"weights": raw, "metadata": meta, "is_delta": is_delta}
+        pending[node_id] = {
+            "weights": raw,
+            "metadata": meta,
+            "is_delta": is_delta,
+            "sample_count": sample_count,
+        }
         log.info(
-            "Received weights from node %s (%d bytes, is_delta=%s) | round %d",
-            node_id, len(raw), is_delta, current_round,
+            "Received weights from node %s | cycle=%d | samples=%d | %d bytes | is_delta=%s",
+            node_id,
+            cycle_id,
+            sample_count,
+            len(raw),
+            is_delta,
         )
         _try_aggregate()
 
-    return {"status": "ok", "round": current_round}
+    return {"status": "ok", "round": current_round, "accepting_cycle": accepting_cycle}
 
 
 @app.post("/reset")
 def reset():
-    global current_round
+    global current_round, accepting_cycle
     with lock:
         current_round = 0
+        accepting_cycle = 0
         pending.clear()
         round_history.clear()
         known_nodes.clear()
