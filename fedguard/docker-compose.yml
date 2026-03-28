@@ -1,0 +1,91 @@
+version: "3.8"
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: fedguard-server
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./shared:/app/shared
+      - mnist_cache:/tmp/mnist_data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  node1:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: fedguard-node1
+    environment:
+      - NODE_ID=1
+      - SERVER_URL=http://server:8000
+      - TOTAL_NODES=3
+      - LOCAL_EPOCHS=2
+      - MAX_ROUNDS=10
+      - ROUND_POLL_INTERVAL=5
+    volumes:
+      - ./shared:/app/shared
+      - mnist_cache:/tmp/mnist_data
+    depends_on:
+      server:
+        condition: service_healthy
+
+  node2:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: fedguard-node2
+    environment:
+      - NODE_ID=2
+      - SERVER_URL=http://server:8000
+      - TOTAL_NODES=3
+      - LOCAL_EPOCHS=2
+      - MAX_ROUNDS=10
+      - ROUND_POLL_INTERVAL=5
+    volumes:
+      - ./shared:/app/shared
+      - mnist_cache:/tmp/mnist_data
+    depends_on:
+      server:
+        condition: service_healthy
+
+  node3:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    container_name: fedguard-node3
+    environment:
+      - NODE_ID=3
+      - SERVER_URL=http://server:8000
+      - TOTAL_NODES=3
+      - LOCAL_EPOCHS=2
+      - MAX_ROUNDS=10
+      - ROUND_POLL_INTERVAL=5
+    volumes:
+      - ./shared:/app/shared
+      - mnist_cache:/tmp/mnist_data
+    depends_on:
+      server:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: fedguard-dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      - SERVER_URL=http://server:8000
+    depends_on:
+      server:
+        condition: service_healthy
+
+volumes:
+  mnist_cache:
