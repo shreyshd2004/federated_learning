@@ -56,15 +56,21 @@ def _flatten(weight_list: List[StateDict]) -> List[torch.Tensor]:
 
 def cosine_similarities(weight_list: List[StateDict]) -> List[float]:
     """
-    Return cosine similarity of each node's update against the group mean.
+    Return cosine similarity of each node's update against the mean *direction*.
 
     Range: -1 (perfectly opposite) → +1 (perfectly aligned).
     Values close to -1 indicate gradient inversion / sign-flip attacks.
+
+    Vectors are L2-normalised before averaging so a high-magnitude poisoned
+    update cannot shift the reference direction by sheer weight — only by
+    direction.  This makes the metric robust to scaling attacks.
     """
     flat = _flatten(weight_list)
-    mean = torch.stack(flat).mean(dim=0)
+    # Normalise to unit vectors, then average to get the consensus direction
+    normed = [f / (f.norm(2) + 1e-8) for f in flat]
+    mean_dir = torch.stack(normed).mean(dim=0)
     return [
-        round(F.cosine_similarity(f.unsqueeze(0), mean.unsqueeze(0)).item(), 4)
+        round(F.cosine_similarity(f.unsqueeze(0), mean_dir.unsqueeze(0)).item(), 4)
         for f in flat
     ]
 

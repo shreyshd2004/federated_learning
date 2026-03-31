@@ -147,7 +147,7 @@ def dlg_reconstruct(
         opt_params = [dummy_data, dummy_labels]
         label_mode = "soft"
 
-    optimizer = LBFGS(opt_params, lr=lr, max_iter=20)
+    optimizer = LBFGS(opt_params, lr=lr, max_iter=20, line_search_fn="strong_wolfe")
     grad_diffs: List[float] = []
 
     # ── Optimisation loop ────────────────────────────────────────────────────
