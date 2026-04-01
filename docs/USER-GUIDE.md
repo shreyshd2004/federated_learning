@@ -206,22 +206,7 @@ You must start the server before nodes and the dashboard. Paths may need `PYTHON
 
 ---
 
-## 10. Visual walkthrough
 
-### Final project (dashboard)
 
-The Streamlit dashboard summarizes rounds, accuracy, node participation, and (when enabled) Byzantine and privacy metrics.
-
-![FedGuard Streamlit dashboard (representative UI)](media/final-dashboard.png)
-
-*Representative illustration of the dashboard experience. Replace with your own screenshot after a local run if you need an exact match to your configuration.*
-
-### Build process
-
-Building consists of cloning the repo, entering `fedguard`, and running `docker compose up --build` until all services are healthy.
-
-![Docker-based build and run workflow](media/build-process.png)
-
-*Illustrative depiction of the build/run workflow. Capture your own terminal or Docker Desktop screenshots for documentation or demos.*
 
 
