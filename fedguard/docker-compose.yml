@@ -55,7 +55,7 @@ services:
       - BYZANTINE_DETECTION=true
       - BYZANTINE_COS_THRESHOLD=0.3
       - BYZANTINE_NORM_SIGMA=2.0
-      - MIN_NODES=2
+      - MIN_NODES=3
       - TOTAL_NODES=3
       - DATA_DIR=/tmp/fedguard_data
       - AGGREGATION_NOISE_STD=0
