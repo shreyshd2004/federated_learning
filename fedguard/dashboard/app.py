@@ -115,6 +115,16 @@ with st.sidebar:
 
     st.divider()
 
+    # ── Active config status ─────────────────────────────────────────────────
+    st.subheader("Active Config")
+    st.markdown(f"**Strategy:** `{cfg.get('aggregation_strategy', '—')}`")
+    st.markdown(f"**Byzantine Detection:** {'✅ On' if cfg.get('byzantine_detection') else '❌ Off'}")
+    st.markdown(f"**Simulate Attack:** {'🔴 On' if cfg.get('simulate_byzantine') else '⚪ Off'}")
+    st.markdown(f"**Dataset:** `{cfg.get('dataset', '—')}`")
+    st.markdown(f"**Nodes:** `{cfg.get('total_nodes', '—')}`")
+
+    st.divider()
+
     st.subheader("Controls")
     if st.button("Reset Training"):
         try:
@@ -244,15 +254,17 @@ for h in history:
 
 if cos_rows:
     df_cos = pd.DataFrame(cos_rows).set_index("Round")
-    # Colour: green = high similarity (trustworthy), red = low (suspicious)
-    styled = df_cos.style.background_gradient(
-        cmap="RdYlGn", vmin=-1.0, vmax=1.0, axis=None
-    ).format("{:.3f}")
-    st.dataframe(styled, use_container_width=True)
+    st.line_chart(df_cos, use_container_width=True)
     st.caption(
         "Values near **+1.0** = aligned with global mean (trusted).  "
         "Values near **−1.0** = inverted update (Byzantine alert)."
     )
+    # Also show latest round values as plain coloured metrics
+    latest_cos = cos_rows[-1]
+    metric_cols = st.columns(len(latest_cos) - 1)
+    for col, (k, v) in zip(metric_cols, {kk: vv for kk, vv in latest_cos.items() if kk != "Round"}.items()):
+        status_label = "Trusted" if v >= 0.0 else "FLAGGED"
+        col.metric(k, f"{v:.3f}", status_label)
 elif byz_enabled:
     st.info("No rounds with cosine data yet.")
 else:
