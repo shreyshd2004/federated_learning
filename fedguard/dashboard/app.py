@@ -59,14 +59,64 @@ with st.sidebar:
     st.caption("Federated Learning for Anomaly Detection")
     st.divider()
 
-    if status:
-        cfg = status.get("config", {})
-        st.subheader("System Config")
-        st.json(cfg)
-        st.divider()
+    cfg = status.get("config", {}) if status else {}
+
+    # ── Live configuration controls ──────────────────────────────────────────
+    st.subheader("Live Configuration")
+    st.caption("Changes apply to the next FL round instantly — no restart needed.")
+
+    agg_strategy = st.selectbox(
+        "Aggregation Strategy",
+        options=["fedavg", "median", "trimmed_mean", "krum"],
+        index=["fedavg", "median", "trimmed_mean", "krum"].index(
+            cfg.get("aggregation_strategy", "fedavg")
+        ),
+    )
+
+    byz_detection = st.toggle(
+        "Byzantine Detection",
+        value=cfg.get("byzantine_detection", True),
+    )
+
+    byz_cos = st.slider(
+        "Cosine Threshold",
+        min_value=0.0, max_value=0.9, step=0.05,
+        value=float(cfg.get("byzantine_cos_threshold", 0.0)),
+        help="Flag nodes with cosine similarity below this value. 0=off, 0.3=moderate, 0.7=strict.",
+    )
+
+    byz_sigma = st.slider(
+        "Norm Outlier σ",
+        min_value=1.0, max_value=5.0, step=0.5,
+        value=float(cfg.get("byzantine_norm_sigma", 2.0)),
+        help="Flag nodes whose L2 norm is more than k standard deviations above the mean.",
+    )
+
+    sim_byz = st.toggle(
+        "Simulate Byzantine Attack",
+        value=cfg.get("simulate_byzantine", False),
+        help="Inject a fake poisoned update each round to demonstrate Byzantine detection.",
+    )
+
+    if st.button("Apply Settings", type="primary"):
+        try:
+            requests.post(f"{SERVER_URL}/config", json={
+                "aggregation_strategy":    agg_strategy,
+                "byzantine_detection":     byz_detection,
+                "byzantine_cos_threshold": byz_cos,
+                "byzantine_norm_sigma":    byz_sigma,
+                "simulate_byzantine":      sim_byz,
+            }, timeout=5)
+            st.cache_data.clear()
+            st.success("Settings applied!")
+            st.rerun()
+        except Exception as exc:
+            st.error(f"Failed: {exc}")
+
+    st.divider()
 
     st.subheader("Controls")
-    if st.button("Reset Training", type="primary"):
+    if st.button("Reset Training"):
         try:
             requests.post(f"{SERVER_URL}/reset", timeout=5)
             st.cache_data.clear()
@@ -97,7 +147,6 @@ accepting_cycle = status.get("accepting_cycle", status.get("config", {}).get("ac
 history        = status.get("history", [])
 known_nodes    = status.get("known_nodes", [])
 pending_nodes  = status.get("pending_nodes", [])
-cfg            = status.get("config", {})
 total_nodes    = cfg.get("total_nodes", 3)
 byz_enabled    = cfg.get("byzantine_detection", False)
 

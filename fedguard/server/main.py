@@ -93,6 +93,16 @@ known_nodes: set = set()
 
 StateDict = Dict[str, torch.Tensor]
 
+# Runtime-mutable config (can be changed via POST /config without restart)
+runtime_config: dict = {
+    "aggregation_strategy":    AGGREGATION_STRATEGY,
+    "byzantine_detection":     BYZANTINE_DETECTION,
+    "byzantine_cos_threshold": BYZ_COS_THRESHOLD,
+    "byzantine_norm_sigma":    BYZ_NORM_SIGMA,
+    "aggregation_noise_std":   AGGREGATION_NOISE_STD,
+    "simulate_byzantine":      False,   # inject a fake poisoned node for demo
+}
+
 
 # ---------------------------------------------------------------------------
 # Aggregation helper
@@ -115,15 +125,23 @@ def _try_aggregate() -> None:
     weight_list: List[StateDict] = [_deserialise(raw) for raw in weight_raw]
     node_ids = submitted_ids.copy()
 
+    # --- Simulate Byzantine node (demo mode) ---------------------------
+    if runtime_config["simulate_byzantine"]:
+        # Inject a fake poisoned update: negate the first clean update
+        fake_weights = {k: -v.clone() for k, v in weight_list[0].items()}
+        weight_list.append(fake_weights)
+        node_ids.append("sim_byzantine")
+        log.info("Injected simulated Byzantine update for demo")
+
     # --- Byzantine detection -------------------------------------------
     defence_report: dict = {}
     flagged_ids: List[str] = []
-    if BYZANTINE_DETECTION and len(weight_list) > 1:
+    if runtime_config["byzantine_detection"] and len(weight_list) > 1:
         weight_list, clean_ids, flagged_ids, defence_report = run_defence(
             weight_list,
             node_ids,
-            cosine_threshold=BYZ_COS_THRESHOLD,
-            norm_k_sigma=BYZ_NORM_SIGMA,
+            cosine_threshold=runtime_config["byzantine_cos_threshold"],
+            norm_k_sigma=runtime_config["byzantine_norm_sigma"],
         )
         node_ids = clean_ids
         if flagged_ids:
@@ -148,9 +166,9 @@ def _try_aggregate() -> None:
 
     avg_weights = aggregate(
         reconstructed,
-        strategy=AGGREGATION_STRATEGY,
+        strategy=runtime_config["aggregation_strategy"],
         sample_weights=sample_weights,
-        noise_std=AGGREGATION_NOISE_STD,
+        noise_std=runtime_config["aggregation_noise_std"],
     )
     global_model.set_state_dict(avg_weights)
 
@@ -185,8 +203,8 @@ def _try_aggregate() -> None:
         "fl_cycle":            accepting_cycle,
         "clean_nodes":         node_ids,
         "flagged_nodes":       flagged_ids,
-        "aggregation":         AGGREGATION_STRATEGY,
-        "byzantine_detection": BYZANTINE_DETECTION,
+        "aggregation":         runtime_config["aggregation_strategy"],
+        "byzantine_detection": runtime_config["byzantine_detection"],
         "cosine_similarities": defence_report.get("cosine_similarities", {}),
         "local_accuracies":    local_accs,
         "avg_epsilon":         avg_epsilon,
@@ -228,15 +246,29 @@ def status():
             "accepting_cycle": accepting_cycle,
             "config": {
                 "dataset":               DATASET,
-                "aggregation_strategy":  AGGREGATION_STRATEGY,
-                "byzantine_detection":   BYZANTINE_DETECTION,
-                "byzantine_cos_threshold": BYZ_COS_THRESHOLD,
                 "min_nodes":             MIN_NODES,
                 "total_nodes":           TOTAL_NODES,
-                "accepting_cycle":       accepting_cycle,
-                "aggregation_noise_std": AGGREGATION_NOISE_STD,
+                **runtime_config,
             },
         }
+
+
+@app.post("/config")
+def update_config(body: dict):
+    """Update runtime configuration without restarting the server."""
+    allowed = {
+        "aggregation_strategy", "byzantine_detection",
+        "byzantine_cos_threshold", "byzantine_norm_sigma",
+        "aggregation_noise_std", "simulate_byzantine",
+    }
+    with lock:
+        for key, val in body.items():
+            if key in allowed:
+                runtime_config[key] = val
+                log.info("Config updated: %s = %s", key, val)
+            else:
+                raise HTTPException(status_code=400, detail=f"Unknown config key: {key}")
+    return {"status": "ok", "config": runtime_config}
 
 
 @app.get("/get_model")
