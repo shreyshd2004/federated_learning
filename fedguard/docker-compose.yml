@@ -31,7 +31,7 @@ x-node-common: &node-common
     - DP_EPSILON=10.0
     - DP_DELTA=1e-5
     - DP_MAX_GRAD_NORM=1.0
-    - ENABLE_COMPRESSION=false
+    - ENABLE_COMPRESSION=true
     - COMPRESSION_TOP_K=0.1
     - NODE_POISONED=false
     - RETRY_LIMIT=5
@@ -53,7 +53,7 @@ services:
       - DATASET=mnist
       - AGGREGATION_STRATEGY=fedavg
       - BYZANTINE_DETECTION=true
-      - BYZANTINE_COS_THRESHOLD=0.0
+      - BYZANTINE_COS_THRESHOLD=0.3
       - BYZANTINE_NORM_SIGMA=2.0
       - MIN_NODES=2
       - TOTAL_NODES=3
@@ -85,7 +85,7 @@ services:
       - DP_EPSILON=10.0
       - DP_DELTA=1e-5
       - DP_MAX_GRAD_NORM=1.0
-      - ENABLE_COMPRESSION=false
+      - ENABLE_COMPRESSION=true
       - COMPRESSION_TOP_K=0.1
       - NODE_POISONED=false
       - RETRY_LIMIT=5
@@ -107,7 +107,7 @@ services:
       - DP_EPSILON=10.0
       - DP_DELTA=1e-5
       - DP_MAX_GRAD_NORM=1.0
-      - ENABLE_COMPRESSION=false
+      - ENABLE_COMPRESSION=true
       - COMPRESSION_TOP_K=0.1
       - NODE_POISONED=false
       - RETRY_LIMIT=5
@@ -129,7 +129,7 @@ services:
       - DP_EPSILON=10.0
       - DP_DELTA=1e-5
       - DP_MAX_GRAD_NORM=1.0
-      - ENABLE_COMPRESSION=false
+      - ENABLE_COMPRESSION=true
       - COMPRESSION_TOP_K=0.1
       # ── Set to true to simulate a Byzantine attacker ──
       - NODE_POISONED=false

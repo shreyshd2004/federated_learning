@@ -133,16 +133,22 @@ def _try_aggregate() -> None:
         node_ids.append("sim_byzantine")
         log.info("Injected simulated Byzantine update for demo")
 
+    # --- Always compute cosine similarities for monitoring -------------
+    from defender import cosine_similarities as _cos_sims
+    cos_scores = _cos_sims(weight_list) if len(weight_list) > 1 else [1.0] * len(weight_list)
+    cos_sim_map = dict(zip(node_ids, cos_scores))
+
     # --- Byzantine detection -------------------------------------------
-    defence_report: dict = {}
+    defence_report: dict = {"cosine_similarities": cos_sim_map}
     flagged_ids: List[str] = []
     if runtime_config["byzantine_detection"] and len(weight_list) > 1:
-        weight_list, clean_ids, flagged_ids, defence_report = run_defence(
+        weight_list, clean_ids, flagged_ids, byz_report = run_defence(
             weight_list,
             node_ids,
             cosine_threshold=runtime_config["byzantine_cos_threshold"],
             norm_k_sigma=runtime_config["byzantine_norm_sigma"],
         )
+        defence_report.update(byz_report)
         node_ids = clean_ids
         if flagged_ids:
             log.warning("Byzantine nodes flagged: %s", flagged_ids)
