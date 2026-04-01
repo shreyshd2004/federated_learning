@@ -4,8 +4,8 @@ Mounted into both server and node containers.
 
 Models
 ------
-SimpleMLP    — MNIST classification (784 → 128 → 10)
-NSLKDDMLP   — NSL-KDD intrusion detection (dynamic_dim → 256 → 128 → 5)
+SimpleMLP    : MNIST classification (784 → 128 → 10)
+NSLKDDMLP   : NSL-KDD intrusion detection (dynamic_dim → 256 → 128 → 5)
 """
 import torch
 import torch.nn as nn

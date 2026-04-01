@@ -1,5 +1,5 @@
 """
-FedGuard Edge Node — federated training client.
+FedGuard Edge Node: federated training client.
 
 Extended capabilities vs. baseline
 ------------------------------------
@@ -116,7 +116,7 @@ def _download_model(feature_dim: int) -> tuple[torch.nn.Module, int]:
             return model, fl_cycle
         except Exception as exc:
             wait = 2 ** attempt
-            log.warning("Download attempt %d failed: %s — retry in %ds", attempt, exc, wait)
+            log.warning("Download attempt %d failed: %s; retry in %ds", attempt, exc, wait)
             time.sleep(wait)
     raise RuntimeError("Model download failed after retries")
 
@@ -125,9 +125,9 @@ def _poison_weights(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tens
     """
     Gradient inversion attack: negate all weight tensors.
     Simulates a malicious node trying to push the global model in the
-    opposite direction — Byzantine detection should flag this node.
+    opposite direction; Byzantine detection should flag this node.
     """
-    log.warning("NODE IS POISONED — injecting gradient inversion attack")
+    log.warning("NODE IS POISONED: injecting gradient inversion attack")
     return {k: -v.clone() for k, v in state_dict.items()}
 
 
@@ -161,7 +161,7 @@ def _upload(
                 timeout=60,
             )
             if r.status_code == 409:
-                log.warning("Stale FL cycle — server rejected upload: %s", r.text)
+                log.warning("Stale FL cycle; server rejected upload: %s", r.text)
                 buf.seek(0)
                 return -1
             r.raise_for_status()
@@ -174,7 +174,7 @@ def _upload(
             return int(resp.get("round", 0))
         except Exception as exc:
             wait = 2 ** attempt
-            log.warning("Upload attempt %d failed: %s — retry in %ds", attempt, exc, wait)
+            log.warning("Upload attempt %d failed: %s; retry in %ds", attempt, exc, wait)
             buf.seek(0)
             time.sleep(wait)
     raise RuntimeError("Weight upload failed after retries")

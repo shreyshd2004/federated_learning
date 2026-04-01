@@ -1,17 +1,17 @@
 """
-FedGuard — Advanced Streamlit Dashboard
+FedGuard: Advanced Streamlit Dashboard
 
 Panels
 ------
-1. Header metrics   — round, accuracy, nodes, privacy budget
-2. Node status      — per-node participation + Byzantine flags
-3. Accuracy chart   — global accuracy over rounds
-4. Cosine similarity heatmap — Byzantine detection per round
-5. Privacy budget   — cumulative ε per round (DP-SGD)
-6. Local vs global accuracy — per-node training quality
-7. Compression ratio — bandwidth savings per round
-8. Round details table — full round history
-9. Config sidebar   — live system configuration
+1. Header metrics: round, accuracy, nodes, privacy budget
+2. Node status: per-node participation + Byzantine flags
+3. Accuracy chart: global accuracy over rounds
+4. Cosine similarity heatmap: Byzantine detection per round
+5. Privacy budget: cumulative ε per round (DP-SGD)
+6. Local vs global accuracy: per-node training quality
+7. Compression ratio: bandwidth savings per round
+8. Round details table: full round history
+9. Config sidebar: live system configuration
 
 Auto-refreshes every 5 seconds.
 """
@@ -49,7 +49,7 @@ def fetch_status():
 status, error = fetch_status()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Sidebar — config
+# Sidebar: config
 # ─────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("🛡️ FedGuard")
@@ -107,13 +107,13 @@ flagged_ever   = set(nid for h in history for nid in h.get("flagged_nodes", []))
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Header metrics
 # ─────────────────────────────────────────────────────────────────────────────
-st.title("🛡️ FedGuard — Federated Learning Monitor")
+st.title("🛡️ FedGuard: Federated Learning Monitor")
 
 c1, c2, c3, c4, c5, c6 = st.columns(6)
 c1.metric("Round", current_round)
 c2.metric("FL cycle", accepting_cycle)
-c3.metric("Latest Accuracy",  f"{latest_acc:.2%}"  if latest_acc  is not None else "—")
-c4.metric("Best Accuracy",    f"{best_acc:.2%}"    if best_acc    is not None else "—")
+c3.metric("Latest Accuracy",  f"{latest_acc:.2%}"  if latest_acc  is not None else "N/A")
+c4.metric("Best Accuracy",    f"{best_acc:.2%}"    if best_acc    is not None else "N/A")
 c5.metric("Active Nodes",     f"{len(known_nodes)} / {total_nodes}")
 c6.metric("Privacy Budget ε", f"{latest_eps:.3f}"  if latest_eps  is not None else "off")
 
@@ -180,7 +180,7 @@ st.divider()
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. Cosine similarity heatmap (Byzantine detection)
 # ─────────────────────────────────────────────────────────────────────────────
-st.subheader("Byzantine Detection — Cosine Similarity per Round")
+st.subheader("Byzantine Detection: Cosine Similarity per Round")
 
 cos_rows = []
 for h in history:
@@ -263,13 +263,13 @@ if history:
     for h in history:
         table_rows.append({
             "Round":        h["round"],
-            "FL cycle":     h.get("fl_cycle", "—"),
+            "FL cycle":     h.get("fl_cycle", "N/A"),
             "Accuracy":     f"{h['accuracy']:.2%}",
             "Nodes":        h["num_nodes"],
-            "Strategy":     h.get("aggregation", "—"),
-            "Flagged":      ", ".join(h.get("flagged_nodes", [])) or "—",
-            "ε":            f"{h['avg_epsilon']:.3f}" if h.get("avg_epsilon") else "—",
-            "Compression":  f"{h['avg_compression']:.1%}" if h.get("avg_compression") else "—",
+            "Strategy":     h.get("aggregation", "N/A"),
+            "Flagged":      ", ".join(h.get("flagged_nodes", [])) or "N/A",
+            "ε":            f"{h['avg_epsilon']:.3f}" if h.get("avg_epsilon") else "N/A",
+            "Compression":  f"{h['avg_compression']:.1%}" if h.get("avg_compression") else "N/A",
             "Time":         pd.to_datetime(h["timestamp"], unit="s").strftime("%H:%M:%S"),
         })
     st.dataframe(pd.DataFrame(table_rows[::-1]), use_container_width=True, hide_index=True)

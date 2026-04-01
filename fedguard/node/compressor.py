@@ -44,7 +44,7 @@ class TopKCompressor:
     # Ship compressed_delta to server (sparse but same dict structure)
 
     # Server side:
-    reconstructed = decompress(compressed_delta)  # no-op — already full shape
+    reconstructed = decompress(compressed_delta)  # no-op; already full shape
     # Aggregate reconstructed deltas, apply to global model.
     """
 
@@ -66,7 +66,7 @@ class TopKCompressor:
         Compress weight delta in-place with Top-K sparsification + error feedback.
 
         Args:
-            delta: {layer_name: Δ_tensor} — difference between local and global weights.
+            delta: {layer_name: Δ_tensor}; difference between local and global weights.
 
         Returns:
             compressed_delta: same structure, non-top-K values zeroed.
@@ -86,7 +86,7 @@ class TopKCompressor:
             n = flat.numel()
             k = max(1, int(n * self.top_k_ratio))
 
-            # Keep top-K by magnitude — zero the rest
+            # Keep top-K by magnitude; zero the rest
             topk_vals, topk_idx = torch.topk(flat.abs(), k)
             mask = torch.zeros_like(flat)
             mask[topk_idx] = 1.0
@@ -117,7 +117,7 @@ class TopKCompressor:
 
 
 # ------------------------------------------------------------------
-# Server-side helper (stateless — compression is lossless in shape)
+# Server-side helper (stateless; compression is lossless in shape)
 # ------------------------------------------------------------------
 
 def compute_delta(

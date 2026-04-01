@@ -3,13 +3,13 @@ Data loading for FedGuard edge nodes.
 
 Supports two datasets
 ---------------------
-mnist   — classic digit classification; clean, balanced, easy to debug
-nslkdd  — NSL-KDD network intrusion dataset; tabular, class-imbalanced,
+mnist   : classic digit classification; clean, balanced, easy to debug
+nslkdd  : NSL-KDD network intrusion dataset; tabular, class-imbalanced,
            realistic for anomaly detection
 
 Partitioning strategy
 ---------------------
-IID  (alpha → ∞): equal random splits — trivial convergence baseline
+IID  (alpha → ∞): equal random splits; trivial convergence baseline
 Non-IID (Dirichlet α):
   Each node's label distribution is drawn from Dir(α).
   α = 0.1 → extreme skew (each node sees ~1 class)
@@ -253,7 +253,7 @@ def get_data_loader(
         batch_size:  Mini-batch size.
 
     Returns:
-        (DataLoader, feature_dim)  — feature_dim=784 for MNIST, ~122 for NSL-KDD.
+        (DataLoader, feature_dim); feature_dim=784 for MNIST, ~122 for NSL-KDD.
     """
     dataset = dataset.lower()
     if dataset == "mnist":

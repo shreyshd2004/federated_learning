@@ -1,5 +1,5 @@
 """
-FedGuard Central Server — FastAPI application.
+FedGuard Central Server: FastAPI application.
 
 Endpoints
 ---------
@@ -130,7 +130,7 @@ def _try_aggregate() -> None:
             log.warning("Byzantine nodes flagged: %s", flagged_ids)
 
     if not weight_list:
-        log.error("No clean updates after defence screening — skipping aggregation")
+        log.error("No clean updates after defence screening; skipping aggregation")
         return
 
     # --- Aggregation ---------------------------------------------------

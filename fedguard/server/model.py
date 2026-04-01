@@ -117,7 +117,7 @@ class GlobalModel:
                 )
                 self._eval_loader = DataLoader(ds, batch_size=512, shuffle=False)
             except Exception as exc:
-                log.warning("NSL-KDD eval loader failed: %s — accuracy will be 0", exc)
+                log.warning("NSL-KDD eval loader failed: %s; accuracy will be 0", exc)
                 return None
 
         return self._eval_loader

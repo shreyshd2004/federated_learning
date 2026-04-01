@@ -3,10 +3,10 @@ Federated aggregation strategies for FedGuard.
 
 Strategies
 ----------
-fedavg        — coordinate-wise mean (McMahan et al., 2017)
-median        — coordinate-wise median; robust to sign-flip attacks
-trimmed_mean  — trim top/bottom k% then average; robust to outlier values
-krum          — select the single most-central update (Blanchard et al., 2017)
+fedavg        : coordinate-wise mean (McMahan et al., 2017)
+median        : coordinate-wise median; robust to sign-flip attacks
+trimmed_mean  : trim top/bottom k% then average; robust to outlier values
+krum          : select the single most-central update (Blanchard et al., 2017)
 
 All functions accept List[state_dict] and return a single aggregated state_dict.
 The caller is responsible for Byzantine screening before passing to these
@@ -94,7 +94,7 @@ def trimmed_mean(weight_list: List[StateDict], trim_ratio: float = 0.1) -> State
     Trim the top and bottom *trim_ratio* fraction of values per coordinate,
     then average the remaining values.
 
-    With trim_ratio=0.1 and n=3 nodes, k=0 (no trimming) — use n≥5 to see
+    With trim_ratio=0.1 and n=3 nodes, k=0 (no trimming); use n≥5 to see
     effect.  Tolerates up to ⌊n·trim_ratio⌋ adversaries at each coordinate.
     """
     if not weight_list:
@@ -124,7 +124,7 @@ def krum_aggregate(weight_list: List[StateDict], f: int = 1) -> StateDict:
     Krum: select the update closest to its n-f-1 nearest neighbours.
 
     Unlike the other strategies this SELECTS one update rather than
-    averaging — information from non-selected nodes is discarded.
+    averaging; information from non-selected nodes is discarded.
     Use when Byzantine fraction may be high (f close to n/2).
     """
     from defender import krum_select

@@ -3,8 +3,8 @@ Local training for FedGuard edge nodes.
 
 Supports two algorithms
 -----------------------
-FedAvg  (mu=0)   — standard local SGD
-FedProx (mu>0)   — adds a proximal penalty ½μ‖w − w_global‖² that limits
+FedAvg  (mu=0)   : standard local SGD
+FedProx (mu>0)   : adds a proximal penalty ½μ‖w − w_global‖² that limits
                    how far local weights drift from the global model.
                    Critical for convergence on non-IID data.
 
@@ -122,7 +122,7 @@ def _train_standard(
             epoch_total += len(y)
 
         epoch_acc = epoch_correct / max(epoch_total, 1)
-        log.info("Epoch %d/%d — loss=%.4f acc=%.4f (mu=%.3f)",
+        log.info("Epoch %d/%d | loss=%.4f acc=%.4f (mu=%.3f)",
                  epoch + 1, epochs, epoch_loss / max(epoch_total, 1), epoch_acc, mu)
         total_loss += epoch_loss
         correct += epoch_correct
@@ -161,7 +161,7 @@ def _train_with_dp(
         from opacus import PrivacyEngine
         from opacus.validators import ModuleValidator
     except ImportError:
-        log.warning("Opacus not installed — falling back to non-DP training")
+        log.warning("Opacus not installed; falling back to non-DP training")
         return _train_standard(model, dataloader, global_state_dict, epochs, lr, mu)
 
     # Opacus requires certain module properties (no BatchNorm in-place issues)
@@ -219,7 +219,7 @@ def _train_with_dp(
         eps_spent = privacy_engine.get_epsilon(target_delta)
         epoch_acc = epoch_correct / max(epoch_total, 1)
         log.info(
-            "Epoch %d/%d — loss=%.4f acc=%.4f ε=%.4f δ=%.2e",
+            "Epoch %d/%d | loss=%.4f acc=%.4f ε=%.4f δ=%.2e",
             epoch + 1, epochs,
             epoch_loss / max(epoch_total, 1),
             epoch_acc, eps_spent, target_delta,

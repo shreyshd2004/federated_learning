@@ -3,7 +3,7 @@ Byzantine fault detection for FedGuard.
 
 Threat model
 ------------
-Up to f < n/2 nodes may be Byzantine — they can send arbitrary weight
+Up to f < n/2 nodes may be Byzantine; they can send arbitrary weight
 updates (gradient inversion, sign-flip, large-norm noise, label-flipping).
 
 Detection methods
@@ -98,7 +98,7 @@ def screen_by_cosine(
             )
 
     if not clean_weights:
-        log.error("All nodes flagged — falling back to full set to avoid empty aggregation")
+        log.error("All nodes flagged; falling back to full set to avoid empty aggregation")
         return weight_list, node_ids, [], sims
 
     return clean_weights, clean_ids, flagged_ids, sims
